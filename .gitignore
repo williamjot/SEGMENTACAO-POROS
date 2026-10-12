@@ -1,0 +1,11 @@
+__pycache__/
+.venv/
+*.pyc
+*.joblib
+data/imagens/
+data/anotacoes/
+resultados/
+saida/
+.Rhistory
+.RData
+
