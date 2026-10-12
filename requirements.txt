@@ -1,0 +1,11 @@
+joblib
+lightgbm
+matplotlib
+numpy
+opencv-python
+pandas
+Pillow
+scikit-image
+scikit-learn
+scipy
+
