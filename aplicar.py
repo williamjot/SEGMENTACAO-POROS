@@ -13,6 +13,18 @@ parser = argparse.ArgumentParser(description="Aplica o modelo e salva máscaras 
 parser.add_argument("--imagens", type=Path, default=Path("data/imagens"))
 parser.add_argument("--modelo", type=Path, default=Path("saida/modelo_rf.joblib"))
 parser.add_argument("--saida", type=Path, default=Path("saida/aplicacao"))
+parser.add_argument(
+    "--micrometros-por-pixel",
+    type=float,
+    default=None,
+    help="Calibração da imagem original; habilita também as métricas em µm e mm².",
+)
+parser.add_argument(
+    "--area-minima-px",
+    type=float,
+    default=50,
+    help="Área mínima do poro em pixels da imagem original (padrão: 50).",
+)
 args = parser.parse_args()
 
 pacote = joblib.load(args.modelo)
@@ -27,27 +39,51 @@ mascaras_dir.mkdir(parents=True, exist_ok=True)
 probabilidades_dir.mkdir(parents=True, exist_ok=True)
 
 linhas = []
+linhas_poros = []
 for arquivo in poros.listar_patches(args.imagens):
     nome = poros.nome_patch(arquivo)
     original = poros.carregar_rgb(arquivo)
     imagem = poros.carregar_rgb(arquivo, escala)
     atributos = poros.calcular_atributos(poros.normalizar(imagem, limites))
     probabilidade = poros.prever_probabilidade(modelo, atributos)
-    mascara = poros.mascara_final(probabilidade)
+    nucleo = poros.mascara_final(probabilidade)
     base = poros.redimensionar_mascara(poros.mascara_rockface(original), *imagem.shape[:2]).astype(bool)
+    mascara = poros.incluir_franja(nucleo, base)
+    mascara = poros.remover_pequenos(
+        mascara, area_minima_px=args.area_minima_px, escala=escala
+    )
     limite = min(imagem.shape[0], round(poros.PASSO_PATCH * escala))
     area = np.s_[:limite, :limite]
     acordo = poros.metricas(mascara[area], base[area])
     incertos = (probabilidade > 0.2) & (probabilidade < 0.8)
+    mascara_analise = mascara[area]
+    propriedades = poros.propriedades_poros(
+        mascara_analise,
+        escala=escala,
+        micrometros_por_pixel=args.micrometros_por_pixel,
+    )
+    resumo_poros = poros.resumir_poros(
+        mascara_analise,
+        propriedades,
+        escala=escala,
+        micrometros_por_pixel=args.micrometros_por_pixel,
+    )
+
+    for propriedade in propriedades:
+        linhas_poros.append({"patch": nome, **propriedade})
 
     linhas.append(
         {
             "patch": nome,
             "origem": "treino" if nome in patches_treino else "novo",
             "porosidade_rf_percent": poros.porosidade(mascara[area]),
+            "porosidade_nucleo_percent": poros.porosidade(nucleo[area]),
+            "incremento_franja_pp": poros.porosidade(mascara[area])
+            - poros.porosidade(nucleo[area]),
             "porosidade_rockface_percent": poros.porosidade(base[area]),
             "iou_rf_rockface": acordo["iou"],
             "pixels_incertos_percent": 100 * float(incertos[area].mean()),
+            **resumo_poros,
         }
     )
 
@@ -60,4 +96,8 @@ for arquivo in poros.listar_patches(args.imagens):
     print(nome)
 
 pd.DataFrame(linhas).sort_values("patch").to_csv(args.saida / "resumo_por_patch.csv", index=False)
+tabela_poros = pd.DataFrame(linhas_poros)
+if tabela_poros.empty:
+    tabela_poros = pd.DataFrame(columns=["patch", "id_poro", "toca_borda"])
+tabela_poros.to_csv(args.saida / "metricas_por_poro.csv", index=False)
 

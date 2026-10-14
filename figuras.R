@@ -38,11 +38,22 @@ p3 <- ggplot(aplicacao, aes(pixels_incertos_percent, iou_rf_rockface, shape = or
   geom_point(size = 2.7, colour = "#C45A00") +
   labs(x = "Pixels incertos (%)", y = "IoU RF x rockface", shape = NULL) + tema
 
+p4 <- ggplot(
+  aplicacao,
+  aes(diametro_eq_mediana_px_original, densidade_poros_por_mpx, shape = origem)
+) +
+  geom_point(size = 2.7, colour = "#207A4B") +
+  labs(
+    x = "Diâmetro equivalente mediano (px originais)",
+    y = "Densidade de poros inteiros (por Mpx)",
+    shape = NULL
+  ) + tema
+
 ggsave(
   file.path(saida_dir, "resultados_quantitativos.pdf"),
-  p1 | p2 | p3,
+  (p1 | p2) / (p3 | p4),
   width = 18.3,
-  height = 6.8,
+  height = 13.2,
   units = "cm"
 )
 
