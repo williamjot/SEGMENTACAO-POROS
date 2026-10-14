@@ -5,6 +5,7 @@ import lightgbm
 import numpy as np
 from PIL import Image
 from scipy import ndimage
+from skimage import measure
 from skimage.color import rgb2hsv, rgb2lab
 from skimage.feature import (
     hessian_matrix,
@@ -196,6 +197,35 @@ def mascara_final(probabilidade, limiar=0.5):
     return cv2.morphologyEx(mascara, cv2.MORPH_OPEN, elemento) > 0
 
 
+def incluir_franja(mascara, mascara_azul):
+    """Inclui pixels azuis conectados ao núcleo previsto, usando oito vizinhos."""
+    mascara = np.asarray(mascara, dtype=bool)
+    mascara_azul = np.asarray(mascara_azul, dtype=bool)
+    if mascara.shape != mascara_azul.shape:
+        raise ValueError("As máscaras devem ter a mesma forma.")
+    candidatos = mascara | mascara_azul
+    rotulos, _ = ndimage.label(candidatos, structure=np.ones((3, 3), dtype=np.uint8))
+    rotulos_nucleo = np.unique(rotulos[mascara])
+    rotulos_nucleo = rotulos_nucleo[rotulos_nucleo != 0]
+    return np.isin(rotulos, rotulos_nucleo)
+
+
+def remover_pequenos(mascara, area_minima_px=50, escala=1.0):
+    """Remove componentes menores que a área mínima na resolução original."""
+    if area_minima_px < 0:
+        raise ValueError("area_minima_px não pode ser negativa.")
+    if escala <= 0:
+        raise ValueError("escala deve ser positiva.")
+    minimo_na_escala = max(1, int(np.ceil(area_minima_px * escala**2)))
+    rotulos, quantidade = ndimage.label(
+        np.asarray(mascara, dtype=bool), structure=np.ones((3, 3), dtype=np.uint8)
+    )
+    areas = np.bincount(rotulos.ravel(), minlength=quantidade + 1)
+    manter = areas >= minimo_na_escala
+    manter[0] = False
+    return manter[rotulos]
+
+
 def mascara_rockface(imagem_rgb):
     bgr = cv2.cvtColor(imagem_rgb, cv2.COLOR_RGB2BGR)
     hsv = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2HSV)
@@ -224,4 +254,174 @@ def metricas(previsto, referencia):
 
 def porosidade(mascara):
     return 100 * float(np.mean(mascara))
+
+
+def propriedades_poros(mascara, escala=1.0, micrometros_por_pixel=None):
+    """Mede os componentes conectados da máscara de poros.
+
+    As medidas em pixels são convertidas para a resolução original da imagem.
+    Poros que tocam a borda são mantidos na porosidade, mas identificados para
+    que tamanhos e formas possam ser resumidos apenas com objetos completos.
+    """
+    if escala <= 0:
+        raise ValueError("escala deve ser positiva.")
+    if micrometros_por_pixel is not None and micrometros_por_pixel <= 0:
+        raise ValueError("micrometros_por_pixel deve ser positivo.")
+
+    mascara = np.asarray(mascara, dtype=bool)
+    altura, largura = mascara.shape
+    rotulos = measure.label(mascara, connectivity=2)
+    linhas = []
+
+    for regiao in measure.regionprops(rotulos):
+        min_l, min_c, max_l, max_c = regiao.bbox
+        toca_borda = min_l == 0 or min_c == 0 or max_l == altura or max_c == largura
+        area = float(regiao.area)
+        perimetro = float(regiao.perimeter_crofton)
+        perimetro_convexo = float(measure.perimeter_crofton(regiao.image_convex))
+        eixo_maior = float(regiao.axis_major_length)
+        eixo_menor = float(regiao.axis_minor_length)
+        circularidade = 4 * np.pi * area / perimetro**2 if perimetro > 0 else np.nan
+        roundness = 4 * area / (np.pi * eixo_maior**2) if eixo_maior > 0 else np.nan
+        centro_l, centro_c = regiao.centroid
+
+        linha = {
+            "id_poro": int(regiao.label),
+            "toca_borda": bool(toca_borda),
+            "area_px2_original": area / escala**2,
+            "perimetro_px_original": perimetro / escala,
+            "diametro_equivalente_px_original": float(regiao.equivalent_diameter_area) / escala,
+            "eixo_maior_px_original": eixo_maior / escala,
+            "eixo_menor_px_original": eixo_menor / escala,
+            "razao_aspecto": eixo_maior / eixo_menor if eixo_menor > 0 else np.nan,
+            "circularidade": circularidade,
+            "roundness": roundness,
+            "solidez": float(regiao.solidity),
+            "excentricidade": float(regiao.eccentricity),
+            "rugosidade": perimetro / perimetro_convexo if perimetro_convexo > 0 else np.nan,
+            "orientacao_graus": float(np.degrees(regiao.orientation)),
+            "numero_euler": int(regiao.euler_number),
+            "centro_y_px_original": float(centro_l / escala),
+            "centro_x_px_original": float(centro_c / escala),
+        }
+        if micrometros_por_pixel is not None:
+            linha.update(
+                {
+                    "area_um2": linha["area_px2_original"] * micrometros_por_pixel**2,
+                    "perimetro_um": linha["perimetro_px_original"] * micrometros_por_pixel,
+                    "diametro_equivalente_um": linha["diametro_equivalente_px_original"]
+                    * micrometros_por_pixel,
+                    "eixo_maior_um": linha["eixo_maior_px_original"] * micrometros_por_pixel,
+                    "eixo_menor_um": linha["eixo_menor_px_original"] * micrometros_por_pixel,
+                }
+            )
+        linhas.append(linha)
+    return linhas
+
+
+def _quantil_ponderado(valores, pesos, quantil):
+    valores = np.asarray(valores, dtype=float)
+    pesos = np.asarray(pesos, dtype=float)
+    validos = np.isfinite(valores) & np.isfinite(pesos) & (pesos > 0)
+    if not np.any(validos):
+        return np.nan
+    valores, pesos = valores[validos], pesos[validos]
+    ordem = np.argsort(valores)
+    valores, pesos = valores[ordem], pesos[ordem]
+    acumulado = np.cumsum(pesos)
+    return float(valores[np.searchsorted(acumulado, quantil * acumulado[-1])])
+
+
+def resumir_poros(mascara, propriedades, escala=1.0, micrometros_por_pixel=None):
+    """Resume porosidade óptica, tamanho, forma, orientação e conectividade 2D."""
+    mascara = np.asarray(mascara, dtype=bool)
+    area_janela = mascara.size / escala**2
+    area_porosa = float(mascara.sum()) / escala**2
+    inteiros = [poro for poro in propriedades if not poro["toca_borda"]]
+
+    def valores(chave):
+        return np.asarray(
+            [poro[chave] for poro in inteiros if np.isfinite(poro[chave])], dtype=float
+        )
+
+    def mediana(chave):
+        x = valores(chave)
+        return float(np.median(x)) if len(x) else np.nan
+
+    def media_ponderada(chave):
+        pares = [
+            (poro[chave], poro["area_px2_original"])
+            for poro in inteiros
+            if np.isfinite(poro[chave]) and poro["area_px2_original"] > 0
+        ]
+        if not pares:
+            return np.nan
+        x, pesos = map(np.asarray, zip(*pares))
+        return float(np.average(x, weights=pesos))
+
+    areas = [poro["area_px2_original"] for poro in propriedades]
+    diametros = valores("diametro_equivalente_px_original")
+    pesos_diametros = np.asarray([poro["area_px2_original"] for poro in inteiros])
+    perimetro_total = sum(poro["perimetro_px_original"] for poro in propriedades)
+    fracao_porosa = area_porosa / max(area_janela, 1)
+    raios = diametros / 2
+    df_2d = np.nan
+    if (
+        0 < fracao_porosa < 1
+        and len(raios) >= 2
+        and np.nanmax(raios) > np.nanmin(raios) > 0
+    ):
+        df_2d = 2 - np.log(fracao_porosa) / np.log(np.nanmin(raios) / np.nanmax(raios))
+
+    angulos = np.radians(valores("orientacao_graus"))
+    pesos_orientacao = np.asarray(
+        [poro["area_px2_original"] for poro in inteiros if np.isfinite(poro["orientacao_graus"])]
+    )
+    orientacao_media = np.nan
+    resultante = np.nan
+    if len(angulos) and pesos_orientacao.sum() > 0:
+        vetor = np.average(np.exp(2j * angulos), weights=pesos_orientacao)
+        orientacao_media = float(np.degrees(np.angle(vetor) / 2))
+        resultante = float(abs(vetor))
+
+    resumo = {
+        "porosidade_optica_percent": 100 * area_porosa / max(area_janela, 1),
+        "n_poros": int(len(propriedades)),
+        "n_poros_inteiros": int(len(inteiros)),
+        "densidade_poros_por_mpx": 1e6 * len(inteiros) / max(area_janela, 1),
+        "area_mediana_px2_original": mediana("area_px2_original"),
+        "diametro_eq_mediana_px_original": mediana("diametro_equivalente_px_original"),
+        "diametro_eq_d50_area_px_original": _quantil_ponderado(
+            diametros, pesos_diametros, 0.5
+        ),
+        "circularidade_mediana": mediana("circularidade"),
+        "circularidade_media_ponderada_area": media_ponderada("circularidade"),
+        "roundness_mediana": mediana("roundness"),
+        "solidez_mediana": mediana("solidez"),
+        "rugosidade_mediana": mediana("rugosidade"),
+        "razao_aspecto_mediana": mediana("razao_aspecto"),
+        "perimetro_especifico_px_inv": perimetro_total / max(area_janela, 1),
+        "orientacao_media_axial_graus": orientacao_media,
+        "resultante_orientacao_axial": resultante,
+        "df_2d_exploratorio": float(df_2d),
+        "df_2d_no_intervalo_geometrico": bool(
+            np.isfinite(df_2d) and 1 <= df_2d <= 2
+        ),
+        "fracao_area_maior_poro_percent": (
+            100 * max(areas) / max(sum(areas), 1) if areas else 0.0
+        ),
+    }
+    if micrometros_por_pixel is not None:
+        area_mm2 = area_janela * micrometros_por_pixel**2 / 1e6
+        resumo.update(
+            {
+                "micrometros_por_pixel": float(micrometros_por_pixel),
+                "densidade_poros_por_mm2": len(inteiros) / max(area_mm2, np.finfo(float).eps),
+                "diametro_eq_mediana_um": mediana("diametro_equivalente_um"),
+                "diametro_eq_d50_area_um": _quantil_ponderado(
+                    valores("diametro_equivalente_um"), pesos_diametros, 0.5
+                ),
+            }
+        )
+    return resumo
 
