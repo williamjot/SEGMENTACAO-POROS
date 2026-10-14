@@ -2,6 +2,7 @@ __pycache__/
 .venv/
 *.pyc
 *.joblib
+!artefatos/modelos/*.joblib
 data/imagens/
 data/anotacoes/
 resultados/

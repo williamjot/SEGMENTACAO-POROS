@@ -48,6 +48,7 @@ SEGMENTACAO-POROS/
 ├── 04_aplicar.py              gera máscaras, probabilidades e métricas 2D
 ├── poros.py                funções compartilhadas
 ├── 05_figuras.R            gráficos quantitativos e painéis de imagens
+├── artefatos/              modelos treinados e máscaras publicadas
 ├── docs/                   explicações das métricas
 ├── tests/                  testes unitários
 └── data/                   imagens e anotações locais, fora do Git
@@ -163,6 +164,18 @@ critério, use `--area-minima-px`.
 Se a calibração da imagem for conhecida, acrescente, por exemplo,
 `--micrometros-por-pixel 0.46`. Esse número é apenas ilustrativo; use o valor
 documentado para o seu microscópio e sua objetiva.
+
+Também é possível usar diretamente o modelo treinado publicado:
+
+```bash
+python 04_aplicar.py \
+  --imagens data/imagens \
+  --modelo artefatos/modelos/modelo_rf_repo_github.joblib \
+  --saida saida/aplicacao
+```
+
+As máscaras do artigo, as versões sem franja e as máscaras regeneradas pelo
+pipeline estão descritas em [artefatos/README.md](artefatos/README.md).
 
 ### 5. Gerar as figuras
 
