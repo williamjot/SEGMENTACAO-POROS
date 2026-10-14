@@ -55,7 +55,7 @@ Sem calibração, comprimentos e áreas permanecem em pixels da imagem original.
 o tamanho do pixel for conhecido, informe-o na aplicação:
 
 ```bash
-python aplicar.py --micrometros-por-pixel 0.46
+python 04_aplicar.py --micrometros-por-pixel 0.46
 ```
 
 O valor acima é apenas um exemplo. Use exclusivamente a calibração documentada

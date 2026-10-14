@@ -42,16 +42,19 @@ máscara pós-processada + probabilidade + métricas petrofísicas ópticas
 
 ```text
 SEGMENTACAO-POROS/
-├── preparar_anotacoes.py   cria imagens realçadas e máscaras vazias
-├── validar.py              compara RF, LightGBM, RF-cor e rockface
-├── treinar.py              treina e salva o Random Forest final
-├── aplicar.py              gera máscaras, probabilidades e métricas 2D
+├── 01_preparar_anotacoes.py   cria imagens realçadas e máscaras vazias
+├── 02_validar.py              compara RF, LightGBM, RF-cor e rockface
+├── 03_treinar.py              treina e salva o Random Forest final
+├── 04_aplicar.py              gera máscaras, probabilidades e métricas 2D
 ├── poros.py                funções compartilhadas
-├── figuras.R               gráficos quantitativos e painéis de imagens
+├── 05_figuras.R            gráficos quantitativos e painéis de imagens
 ├── docs/                   explicações das métricas
 ├── tests/                  testes unitários
 └── data/                   imagens e anotações locais, fora do Git
 ```
+
+Os prefixos `01_` a `05_` indicam a ordem de execução. O arquivo `poros.py` é
+uma biblioteca compartilhada pelos scripts Python e não é executado diretamente.
 
 ## Instalação
 
@@ -113,7 +116,7 @@ e rabiscos não são enviados ao GitHub.
 ### 1. Preparar a anotação
 
 ```bash
-python preparar_anotacoes.py --imagens data/imagens --saida data/anotacoes
+python 01_preparar_anotacoes.py --imagens data/imagens --saida data/anotacoes
 ```
 
 Abra as máscaras no napari ou no GIMP e faça rabiscos em regiões representativas.
@@ -125,7 +128,7 @@ sólido, inclusive regiões que possam ser confundidas pelo modelo.
 Use no mínimo três recortes anotados:
 
 ```bash
-python validar.py \
+python 02_validar.py \
   --imagens data/imagens \
   --anotacoes data/anotacoes \
   --saida resultados/validacao
@@ -138,7 +141,7 @@ substituem uma máscara densa independente.
 ### 3. Treinar o modelo final
 
 ```bash
-python treinar.py \
+python 03_treinar.py \
   --imagens data/imagens \
   --anotacoes data/anotacoes \
   --modelo saida/modelo_rf.joblib
@@ -147,7 +150,7 @@ python treinar.py \
 ### 4. Aplicar e medir os poros
 
 ```bash
-python aplicar.py \
+python 04_aplicar.py \
   --imagens data/imagens \
   --modelo saida/modelo_rf.joblib \
   --saida saida/aplicacao
@@ -164,7 +167,7 @@ documentado para o seu microscópio e sua objetiva.
 ### 5. Gerar as figuras
 
 ```bash
-Rscript figuras.R \
+Rscript 05_figuras.R \
   data/imagens \
   resultados/validacao \
   saida/aplicacao \

@@ -7,7 +7,7 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 4) {
-  stop("Uso: Rscript figuras.R <imagens> <validacao> <aplicacao> <saida>")
+  stop("Uso: Rscript 05_figuras.R <imagens> <validacao> <aplicacao> <saida>")
 }
 
 imagens_dir <- args[1]
